@@ -169,7 +169,7 @@ void list_files(const char *directory, int show_all, int long_list) {
     fprintf(stderr, "This program is only supported on UNIX systems.\n");
 #endif
 }
-
+//
 int main(int argc, char *argv[]) {
     int show_all = 0, long_list = 0, opt;
     while ((opt = getopt(argc, argv, "la")) != -1) {
