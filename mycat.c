@@ -5,88 +5,79 @@
 
 #define MAX_LINE_LEN 1024
 
-void print_lines(FILE *file, int show_nonempty_line_num, int show_all_line_num, int show_ends) {
-    char line[1024];
-    int line_num = 1; // Общий номер строки
-    int non_empty_line_num = 1; // Номер непустой строки
-
+void print_lines(FILE *file, int show_nonempty_line_num, int show_all_line_num, int show_ends, int *line_number_ptr) {
+    char line[MAX_LINE_LEN];
     while (fgets(line, sizeof(line), file)) {
-        // Убираем символ новой строки, если он есть
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0'; // Заменяем на нуль-терминатор
-        }
+        int is_empty = (line[0] == '\n' || line[0] == '\0');
 
-        // Проверяем, является ли строка пустой
-        if (strlen(line) == 0) {
-            continue; // Пропускаем пустые строки
-        }
-
-        // Если нужно показать символ конца строки
-        if (show_ends) {
-    // Проверка на пустую строку
-    if (strlen(line) > 0 && line[strlen(line) - 1] != '\n') {
-        strcat(line, "$");
-    }
-}
-
-
-        // Выводим строки с номерами
         if (show_nonempty_line_num) {
-            printf("%6d\t%s\n", non_empty_line_num++, line); // Для непустых строк
+            if (!is_empty) {
+                printf("%6d\t", (*line_number_ptr)++);
+            }
         } else if (show_all_line_num) {
-            printf("%6d\t%s\n", line_num++, line); // Для всех строк
-        } else {
-            printf("%s\n", line); // Только выводим строку
+            printf("%6d\t", (*line_number_ptr)++);
         }
-        line_num++; // Увеличиваем общий номер строки
+
+        size_t len = strlen(line);
+        if (show_ends) {
+            if (len > 0 && line[len - 1] == '\n') {
+                line[len - 1] = '\0';
+                printf("%s$\n", line);
+            } else {
+                printf("%s$", line);
+            }
+        } else {
+            fputs(line, stdout);
+        }
     }
 }
-
 
 int main(int argc, char *argv[]) {
     int show_nonempty_line_num = 0; // Нумеровать только непустые строки
     int show_all_line_num = 0; // Нумеровать все строки
     int show_ends = 0; // Добавлять $ в конец строки
-    char *filename = NULL; // Имя файла
+    int line_number = 1;
     int opt;
 
     // Обработка флагов
     while ((opt = getopt(argc, argv, "nEb")) != -1) {
         switch (opt) {
             case 'b':
-                show_nonempty_line_num = 1; // Включаем нумерацию только непустых строк
+                show_nonempty_line_num = 1;
                 break;
             case 'n':
-                show_all_line_num = 1; // Включаем нумерацию всех строк
+                show_all_line_num = 1;
                 break;
             case 'E':
-                show_ends = 1; // Включаем добавление символа $
+                show_ends = 1;
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-n|-b|-E] [file]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-n|-b|-E] [file...]\n", argv[0]);
                 return 1;
         }
     }
 
-    // Получаем имя файла, если оно указано
-    if (optind < argc) {
-        filename = argv[optind];
+    if (show_nonempty_line_num) {
+        show_all_line_num = 0;
     }
 
-    // Открываем файл или стандартный ввод
-    FILE *file = filename ? fopen(filename, "r") : stdin;
-    if (!file) {
-        perror("Error opening file");
-        return 1;
-    }
+    if (optind >= argc) {
+        print_lines(stdin, show_nonempty_line_num, show_all_line_num, show_ends, &line_number);
+    } else {
+        for (int i = optind; i < argc; i++) {
+            FILE *file = fopen(argv[i], "r");
+            if (!file) {
+                perror("Ошибка при открытии файла");
+                continue;
+            }
 
-    // Печатаем строки с учетом флагов
-    print_lines(file, show_nonempty_line_num, show_all_line_num, show_ends);
+            if (argc - optind > 1) {
+                printf("==> %s <==\n", argv[i]);
+            }
 
-    // Закрываем файл, если это не stdin
-    if (file != stdin) {
-        fclose(file);
+            print_lines(file, show_nonempty_line_num, show_all_line_num, show_ends, &line_number);
+            fclose(file);
+        }
     }
 
     return 0;
