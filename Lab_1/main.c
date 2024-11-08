@@ -42,7 +42,15 @@ void print_file_info(const char *fullpath, const char *name, struct stat *file_s
     // Имя владельца и группы
     struct passwd *pw = getpwuid(file_stat->st_uid);
     struct group *gr = getgrgid(file_stat->st_gid);
-    printf(" %-8s %-8s", pw ? pw->pw_name : "", gr ? gr->gr_name : "");
+    printf(" %-8s %-8s", pw ? pw->pw_name : (char[10]){0}, gr ? gr->gr_name : (char[10]){0});
+    
+    // Если владельца или группы нет, выводим UID и GID
+    if (!pw) {
+        printf(" %-8u", file_stat->st_uid);
+    }
+    if (!gr) {
+        printf(" %-8u", file_stat->st_gid);
+    }
 
     // Размер файла
     printf(" %8lld", (long long)file_stat->st_size);
