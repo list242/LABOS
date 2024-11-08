@@ -1,25 +1,13 @@
-.PHONY: all clean
-
 CC = gcc
+CFLAGS = -Wall -Wextra -std=c99
 
-CFLAGS = -Wall -Wextra
+all: mycat mygrep
 
-TARGETS = mycat mygrep
+mycat: mycat.c
+	$(CC) $(CFLAGS) -o mycat mycat.c
 
-SOURCES = mycat.c mygrep.c
-
-OBJECTS = $(SOURCES:.c=.o)
-
-all: $(TARGETS)
-
-mycat: mycat.o
-	$(CC) $(CFLAGS) -o mycat mycat.o
-
-mygrep: mygrep.o
-	$(CC) $(CFLAGS) -o mygrep mygrep.o
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+mygrep: mygrep.c
+	$(CC) $(CFLAGS) -o mygrep mygrep.c
 
 clean:
-	rm -f $(OBJECTS) $(TARGETS)
+	rm -f mycat mygrep
