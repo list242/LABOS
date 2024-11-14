@@ -1,94 +1,89 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <ctype.h>
-
+#include <unistd.h>
+       
 #define USER_SHIFT 6
 #define GROUP_SHIFT 3
 #define OTHER_SHIFT 0
 
-int change_mode(const char *mode_str, const char *file) {
-    struct stat st;
-    if (stat(file, &st) == -1) {
-        perror("Ошибка получения информации о файле");
-        return -1;
+#define READ_SHIFT 2
+#define WRITE_SHIFT 1
+#define EXECUTE_SHIFT 0
+     
+mode_t adjustPermission(char operation, int shift, mode_t currentMode) {
+    if (operation == '+') currentMode = currentMode | (1 << shift);  
+    else currentMode = currentMode & ~(1 << shift); 
+    return currentMode;
+}
+     
+mode_t calculateNewMode(mode_t currentMode, const char* permissions) {
+    mode_t newMode = strtol(permissions, NULL, 8);     
+    if (newMode || (strcmp(permissions, "000") == 0)
+    || (strcmp(permissions, "00") == 0)
+    || (strcmp(permissions, "0") == 0)) return newMode;                      
+    char operation = ' ';
+    int groupShift = -1; 
+    int permissionShift = -1;
+    for(size_t i = 0; i < strlen(permissions); ++i) {   
+        switch (permissions[i]) {
+            case 'u':
+                groupShift = USER_SHIFT;
+                break;
+            case 'g':
+                groupShift = GROUP_SHIFT;
+                break;
+            case 'o':
+                groupShift = OTHER_SHIFT;
+                break;
+            case '+':
+            case '-':
+                operation = permissions[i];
+                break;
+            case 'r':
+                permissionShift = READ_SHIFT;
+                break;
+            case 'w':
+                permissionShift = WRITE_SHIFT;
+                break;
+            case 'x':
+                permissionShift = EXECUTE_SHIFT;
+                break;
+            case ',':
+                groupShift = -1;
+                permissionShift = -1;
+                break;
+        }
+        if (permissionShift == -1 || operation == ' ') continue;
+        if (groupShift == -1) {
+            currentMode = adjustPermission(operation, USER_SHIFT + permissionShift, currentMode);
+            currentMode = adjustPermission(operation, GROUP_SHIFT + permissionShift, currentMode);
+            currentMode = adjustPermission(operation, OTHER_SHIFT + permissionShift, currentMode);
+        }
+        else currentMode = adjustPermission(operation, groupShift + permissionShift, currentMode);     
     }
-
-    mode_t new_mode = st.st_mode;
-
-    if (isdigit(mode_str[0])) {
-        new_mode = strtol(mode_str, NULL, 8);
-        if (chmod(file, new_mode) == -1) {
-            perror("Ошибка изменения прав доступа");
-            return -1;
-        }
-    } else {
-        char operation = ' ';
-        int groupShift = -1; 
-        int permissionShift = -1;
-
-        for (size_t i = 0; i < strlen(mode_str); ++i) {
-            switch (mode_str[i]) {
-                case 'u':
-                    groupShift = USER_SHIFT;
-                    break;
-                case 'g':
-                    groupShift = GROUP_SHIFT;
-                    break;
-                case 'o':
-                    groupShift = OTHER_SHIFT;
-                    break;
-                case '+':
-                case '-':
-                    operation = mode_str[i];
-                    break;
-                case 'r':
-                    permissionShift = 2;
-                    break;
-                case 'w':
-                    permissionShift = 1;
-                    break;
-                case 'x':
-                    permissionShift = 0;
-                    break;
-                case ',':
-                    groupShift = -1;
-                    permissionShift = -1;
-                    break;
-            }
-            if (permissionShift == -1 || operation == ' ') continue;
-            if (groupShift == -1) {
-                new_mode = operation == '+' ? (new_mode | (1 << (USER_SHIFT + permissionShift)) | (1 << (GROUP_SHIFT + permissionShift)) | (1 << (OTHER_SHIFT + permissionShift))) :
-                                              (new_mode & ~((1 << (USER_SHIFT + permissionShift)) | (1 << (GROUP_SHIFT + permissionShift)) | (1 << (OTHER_SHIFT + permissionShift))));
-            } else {
-                new_mode = operation == '+' ? (new_mode | (1 << (groupShift + permissionShift))) : 
-                                              (new_mode & ~(1 << (groupShift + permissionShift)));
-            }
-        }
-
-        if (chmod(file, new_mode) == -1) {
-            perror("Ошибка изменения прав доступа");
-            return -1;
-        }
-    }
-    return 0;
+    return currentMode;    
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Использование: %s <режим> <файл>\n", argv[0]);
-        return EXIT_FAILURE;
+        fprintf(stderr, "chmod: missing arguments");
+        exit(1);
     }
-
-    for (int i = 2; i < argc; ++i) {
-        if (change_mode(argv[1], argv[i]) == -1) {
-            return EXIT_FAILURE;
+    char* permissions = argv[1];   
+    struct stat fileStat; 
+    char* filePath;
+    for (int i = 2; i < argc; ++i) {     
+        filePath = argv[i];
+        if (stat(filePath, &fileStat) == -1) {
+            perror("file not found");
+            exit(1);
         }
+        if (chmod(filePath, calculateNewMode(fileStat.st_mode, permissions)) != 0)
+            fprintf(stderr, "unable to change permissions");
     }
-
-    printf("Права доступа успешно изменены.\n");
-    return EXIT_SUCCESS;
+    return 0;
 }
