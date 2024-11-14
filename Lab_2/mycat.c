@@ -3,78 +3,73 @@
 #include <string.h>
 #include <ctype.h>
 
+// Проверка, является ли строка пустой
 int is_empty_line(const char *line) {
     while (*line) {
         if (!isspace((unsigned char)*line)) {
-            return 0;
+            return 0;  // Строка не пустая
         }
         line++;
     }
-    return 1;
+    return 1;  // Строка пустая
 }
 
-void trim(char *str) {
-    while (isspace((unsigned char)*str)) str++;
-    if (*str == 0) return;
+void print_line(char *line, int number_all, int number_nonempty, int show_ends, int *line_number_ptr) {
+    size_t len = strlen(line);
 
-    char *end = str + strlen(str) - 1;
-    while (end > str && isspace((unsigned char)*end)) end--;
-    *(end + 1) = '\0';
+    // Убираем символ новой строки в конце строки
+    if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+    }
+
+    // Нумерация строк в зависимости от флагов
+    if (number_nonempty && !is_empty_line(line)) {
+        printf("%6d\t", (*line_number_ptr)++);
+    } else if (number_all) {
+        printf("%6d\t", (*line_number_ptr)++);
+    }
+
+    // Печать строки с символом конца строки, если требуется
+    if (show_ends) {
+        printf("%s$\n", line);  // Добавляем символ $ в конце строки
+    } else {
+        printf("%s\n", line);  // Просто выводим строку без изменений
+    }
 }
 
-void print_file(FILE *file, int number_all, int number_nonempty, int show_ends, int *line_number_ptr, int show_end_at_start) {
+void process_file(FILE *file, int number_all, int number_nonempty, int show_ends) {
     char line[4096];
+    int line_number = 1;
 
+    // Чтение строк из файла
     while (fgets(line, sizeof(line), file)) {
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
-        }
-
-        trim(line);
-        int is_empty = is_empty_line(line);
-
-        if (number_nonempty && !is_empty) {
-            printf("%6d\t", (*line_number_ptr)++);
-        } else if (number_all) {
-            printf("%6d\t", (*line_number_ptr)++);
-        }
-
-        if (show_ends) {
-            if (!is_empty) {
-                if (show_end_at_start) {
-                    printf("$%s\n", line);
-                } else {
-                    printf("%s$\n", line);
-                }
-            } else {
-                printf("$\n");
-            }
+        if (number_nonempty && is_empty_line(line)) {
+            // Если флаг -b и строка пустая, пропускаем нумерацию
+            printf("\n");
         } else {
-            printf("%s\n", line);
+            print_line(line, number_all, number_nonempty, show_ends, &line_number);
         }
     }
 }
 
 int main(int argc, char *argv[]) {
     int number_all = 0, number_nonempty = 0, show_ends = 0;
-    int line_number = 1;
     int files_provided = 0;
     int arg_index = 1;
-    int show_end_at_start = 0;
 
+    // Обработка аргументов командной строки
     for (; arg_index < argc; ++arg_index) {
         if (argv[arg_index][0] == '-') {
             for (int j = 1; argv[arg_index][j] != '\0'; ++j) {
                 switch (argv[arg_index][j]) {
                     case 'n':
-                        number_all = 1;
+                        number_all = 1;  // Нумеровать все строки
                         break;
                     case 'b':
-                        number_nonempty = 1;
+                        number_nonempty = 1;  // Нумеровать только непустые строки
                         break;
                     case 'E':
-                        show_ends = 1;
+                        show_ends = 1;  // Печать $ в конце строки
                         break;
                     default:
                         fprintf(stderr, "Неизвестный параметр: -%c\n", argv[arg_index][j]);
@@ -87,24 +82,18 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (number_nonempty) {
-        number_all = 0;
-    }
-
-    if (show_ends && number_nonempty == 0) {
-        show_end_at_start = 1;
-    }
-
+    // Обработка ввода
     if (!files_provided) {
-        print_file(stdin, number_all, number_nonempty, show_ends, &line_number, show_end_at_start);
+        process_file(stdin, number_all, number_nonempty, show_ends);
     } else {
+        // Чтение файлов
         for (int i = arg_index; i < argc; ++i) {
             FILE *file = fopen(argv[i], "r");
             if (!file) {
                 perror("Ошибка при открытии файла");
                 exit(1);
             }
-            print_file(file, number_all, number_nonempty, show_ends, &line_number, show_end_at_start);
+            process_file(file, number_all, number_nonempty, show_ends);
             fclose(file);
         }
     }
