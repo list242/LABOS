@@ -54,14 +54,15 @@ void process_file(FILE *file, int number_all, int number_nonempty, int show_ends
 
 int main(int argc, char *argv[]) {
     int number_all = 0, number_nonempty = 0, show_ends = 0;
-    int files_provided = 0;
-    int arg_index = 1;
+    int file_count = 0;
+    char *files[argc];  // Массив для хранения имен файлов
 
     // Обработка аргументов командной строки
-    for (; arg_index < argc; ++arg_index) {
-        if (argv[arg_index][0] == '-') {
-            for (int j = 1; argv[arg_index][j] != '\0'; ++j) {
-                switch (argv[arg_index][j]) {
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i][0] == '-') {
+            // Обработка флагов
+            for (int j = 1; argv[i][j] != '\0'; ++j) {
+                switch (argv[i][j]) {
                     case 'n':
                         number_all = 1;  // Нумеровать все строки
                         break;
@@ -72,26 +73,26 @@ int main(int argc, char *argv[]) {
                         show_ends = 1;  // Печать $ в конце строки
                         break;
                     default:
-                        fprintf(stderr, "Неизвестный параметр: -%c\n", argv[arg_index][j]);
+                        fprintf(stderr, "Неизвестный параметр: -%c\n", argv[i][j]);
                         return 1;
                 }
             }
         } else {
-            files_provided = 1;
-            break;
+            // Если это не флаг, то это имя файла
+            files[file_count++] = argv[i];
         }
     }
 
-    // Обработка ввода
-    if (!files_provided) {
+    // Если файлы не указаны, читаем из стандартного ввода
+    if (file_count == 0) {
         process_file(stdin, number_all, number_nonempty, show_ends);
     } else {
-        // Чтение файлов
-        for (int i = arg_index; i < argc; ++i) {
-            FILE *file = fopen(argv[i], "r");
+        // Обработка файлов
+        for (int i = 0; i < file_count; ++i) {
+            FILE *file = fopen(files[i], "r");
             if (!file) {
                 perror("Ошибка при открытии файла");
-                exit(1);
+                continue;
             }
             process_file(file, number_all, number_nonempty, show_ends);
             fclose(file);
