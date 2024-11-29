@@ -7,7 +7,7 @@
 #include <errno.h>
 #ifdef __unix__
 #include <unistd.h>
-
+//йоу
 
 #define BUFFER_SIZE 4096
 
@@ -40,7 +40,7 @@ int add_file_to_archive(const char *archive_name, const char *filename) {
     write(archive_fd, &file_stat.st_size, sizeof(file_stat.st_size));  // Записываем размер файла
     write(archive_fd, &file_stat, sizeof(file_stat)); // Записываем атрибуты файла
 
-    // Копирование содержимого файла
+    
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
     while ((bytes_read = read(file_fd, buffer, sizeof(buffer))) > 0) {
@@ -52,7 +52,6 @@ int add_file_to_archive(const char *archive_name, const char *filename) {
     return 0;
 }
 
-// Функция извлечения файла из архива
 int extract_file_from_archive(const char *archive_name, const char *filename, int delete_after) {
     int archive_fd = open(archive_name, O_RDWR);
     if (archive_fd < 0) {
@@ -89,7 +88,6 @@ int extract_file_from_archive(const char *archive_name, const char *filename, in
                 return -1;
             }
 
-            // Копируем содержимое файла
             char buffer[BUFFER_SIZE];
             off_t remaining = file_size;
             while (remaining > 0) {
