@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"name": "LABOS",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"string.h": "c",
+			"errno.h": "c",
+			"stat.h": "c",
+			"types.h": "c"
+		}
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": []
+	}
+}
