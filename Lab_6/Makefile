@@ -1,18 +1,14 @@
-.PHONY: all clean run
-
-SRC = main.c
-OUT = my_program
-
 CC = gcc
-CFLAGS = -Wall -Wextra
+CFLAGS = -Wall -Wextra -std=c11
+TARGET = main
+SRCS = main.c
 
-all: $(OUT)
+.PHONY: all clean
 
-$(OUT): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o $(OUT)
+all: $(TARGET)
 
-run: $(OUT)
-	./$(OUT)
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-	rm -rf *.o $(OUT)
+	rm -f $(TARGET) my_fifo
