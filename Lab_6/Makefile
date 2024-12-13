@@ -1,14 +1,17 @@
+# Makefile
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11
-TARGET = main
-SRCS = main.c
+CFLAGS = -Wall -Wextra -Werror -std=c11
 
-.PHONY: all clean
+all: my_pipe my_fifo
 
-all: $(TARGET)
+my_pipe: my_pipe.c
+	$(CC) $(CFLAGS) -o my_pipe my_pipe.c
 
-$(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) -o $@ $^
+my_fifo: my_fifo.c
+	$(CC) $(CFLAGS) -o my_fifo my_fifo.c
+
 
 clean:
-	rm -f $(TARGET) my_fifo
+	rm -f my_pipe my_fifo
+
+.PHONY: all clean
