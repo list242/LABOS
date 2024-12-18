@@ -1,12 +1,10 @@
-.PHONY: all clean run
+all: sender receiver
 
-all: semaphore_sync
+sender: sender.c
+	gcc -o sender sender.c
 
-semaphore_sync: src/semaphore_sync.c
-	gcc src/semaphore_sync.c -o semaphore_sync -Wall -Wextra -D__unix__
-
-run: semaphore_sync
-	./semaphore_sync producer & ./semaphore_sync consumer
+receiver: receiver.c
+	gcc -o receiver receiver.c
 
 clean:
-	rm -rf *.o semaphore_sync
+	rm -f sender receiver

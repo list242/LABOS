@@ -1,94 +1,69 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdatomic.h>
-#include <string.h>
-#include <time.h>
+#include <pthread.h>
 #include <unistd.h>
-#ifdef __unix__
-#include <sys/wait.h>
-#endif
-#define ARRAY_SIZE 10       
-#define NUM_READERS 10      
+#include <string.h>
 
-char shared_array[ARRAY_SIZE] = {0};
+#define NUM_READERS 10
+#define BUFFER_SIZE 100
 
-atomic_int write_count = 0;
+char shared_array[BUFFER_SIZE];
+pthread_mutex_t mutex;
+int counter = 0;
 
-atomic_flag lock = ATOMIC_FLAG_INIT;
-void lock_mutex() {
-    while (atomic_flag_test_and_set(&lock)) {
-        
-        usleep(100);
-    }
-}
-
-// Функция для разблокировки (имитация мьютекса)
-void unlock_mutex() {
-    atomic_flag_clear(&lock);
-}
-
-// Пишущий процесс
-void writer() {
+void *writer_thread(void *arg) {
     while (1) {
-        lock_mutex();
-
-        // Запись в массив (пишущий процесс записывает номер записи)
-        shared_array[write_count % ARRAY_SIZE] = (write_count % 10) + '0'; // Записываем цифру как символ
-        printf("Writer: Written %d at index %d\n", write_count, write_count % ARRAY_SIZE);
-        write_count++;
-
-        unlock_mutex();
-
-        // Задержка для симуляции работы
-        usleep(500000); // 0.5 секунды
+        pthread_mutex_lock(&mutex);
+        counter++;
+        snprintf(shared_array, BUFFER_SIZE, "%d", counter);
+        pthread_mutex_unlock(&mutex);
+        sleep(1);
     }
+    return NULL;
 }
-
-// Читающий процесс
-void reader(int tid) {
+void *reader_thread(void *arg) {
+    int thread_num = *((int *)arg);
+    free(arg);
     while (1) {
-        lock_mutex();
-
-        // Чтение текущего состояния массива
-        printf("Reader %d: Current array state: ", tid);
-        for (int i = 0; i < ARRAY_SIZE; i++) {
-            printf("%c ", shared_array[i] ? shared_array[i] : '_'); // Пустые элементы отображаются как '_'
-        }
-        printf("\n");
-
-        unlock_mutex();
-
-        // Задержка для симуляции работы
-        usleep(500000); // 0.5 секунды
+        char local_copy[BUFFER_SIZE];
+        strcpy(local_copy, shared_array);
+        printf("Читающий поток %d: shared_array = %s\n", thread_num, local_copy);
+        sleep(1);
     }
+    return NULL;
 }
-
 int main() {
-    pid_t writer_pid;
-    pid_t reader_pids[NUM_READERS];
-
-    // Создаем пишущий процесс
-    writer_pid = fork();
-    if (writer_pid == -1) {
-        perror("Failed to create writer process");
-        return EXIT_FAILURE;
-    } else if (writer_pid == 0) {
-        writer(); // Запуск функции писателя в дочернем процессе
-        exit(EXIT_SUCCESS);
+    pthread_t writer;
+    pthread_t readers[NUM_READERS];
+    if (pthread_mutex_init(&mutex, NULL) != 0) {
+        printf("Ошибка инициализации мьютекса\n");
+        return 1;
     }
-
-    // Создаем читающие процессы
+    if (pthread_create(&writer, NULL, writer_thread, NULL) != 0) {
+        printf("Ошибка создания пишущего потока\n");
+        return 1;
+    }
     for (int i = 0; i < NUM_READERS; i++) {
-        reader_pids[i] = fork();
-        if (reader_pids[i] == -1) {
-            perror("Failed to create reader process");
-            return EXIT_FAILURE;
-        } else if (reader_pids[i] == 0) {
-            reader(i); // Запуск функции читателя в дочернем процессе
-            exit(EXIT_SUCCESS);
+        int *arg = malloc(sizeof(*arg));
+        if (arg == NULL) {
+            printf("Ошибка выделения памяти для аргумента потока\n");
+            exit(EXIT_FAILURE);
+        }
+        *arg = i;
+        if (pthread_create(&readers[i], NULL, reader_thread, arg) != 0) {
+            printf("Ошибка создания читающего потока %d\n", i);
+            return 1;
         }
     }
-
-    wait(NULL);
-    return EXIT_SUCCESS;
+    sleep(10);
+    pthread_cancel(writer);
+    for (int i = 0; i < NUM_READERS; i++) {
+        pthread_cancel(readers[i]);
+    }
+    pthread_join(writer, NULL);
+    for (int i = 0; i < NUM_READERS; i++) {
+        pthread_join(readers[i], NULL);
+    }
+    pthread_mutex_destroy(&mutex);
+    return 0;
 }

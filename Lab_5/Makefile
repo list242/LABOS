@@ -1,12 +1,11 @@
-.PHONY: all clean run
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c99
+TARGET = arch
 
-all: archiver
+all: $(TARGET)
 
-archiver: main.c
-	gcc main.c -o archiver -Wall -Wextra
-
-run: archiver
-	./archiver
+$(TARGET): arch.c
+	$(CC) $(CFLAGS) -o $(TARGET) arch.c
 
 clean:
-	rm -rf *.o archiver
+	rm -f $(TARGET) *.o

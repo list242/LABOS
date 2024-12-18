@@ -1,102 +1,77 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <windows.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <unistd.h>
 #include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <signal.h>
 
-#define SHM_PATH "shared_memory_example"
-#define BUFFER_SIZE 128
+static const char* path = "./shm";
+static int shmid = -1;
+static char* mas = NULL;
 
-typedef struct {
-    DWORD sender_pid;  // Используем DWORD для идентификатора процесса в Windows
-    char time_str[BUFFER_SIZE];
-} shared_data_t;
-
-HANDLE mutex;  // Мьютекс для синхронизации
-
-/** Получение текущего времени в строковом формате */
-void get_current_time(char *buffer, size_t size) {
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    strftime(buffer, size, "%Y-%m-%d %H:%M:%S", t);
-}
-
-/** Инициализация разделяемой памяти (используем файл) */
-int initialize_shared_memory(HANDLE *shm_fd) {
-    *shm_fd = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(shared_data_t), SHM_PATH);
-    if (*shm_fd == NULL) {
-        printf("Failed to create shared memory (Error: %lu)\n", GetLastError());
-        return -1;
+void cleanup() {
+    if (mas != NULL && mas != (char*)-1) {
+        shmdt(mas);
+        mas = NULL;
     }
-    return 0;
-}
-
-/** Запись данных в разделяемую память */
-int write_to_shared_memory(HANDLE shm_fd, shared_data_t *data) {
-    // Используем мьютекс для синхронизации
-    WaitForSingleObject(mutex, INFINITE);
-
-    LPVOID ptr = MapViewOfFile(shm_fd, FILE_MAP_WRITE, 0, 0, sizeof(shared_data_t));
-    if (ptr == NULL) {
-        printf("Failed to map shared memory (Error: %lu)\n", GetLastError());
-        ReleaseMutex(mutex);
-        return -1;
+    if (shmid != -1) {
+        shmctl(shmid, IPC_RMID, NULL);
+        shmid = -1;
     }
-
-    memcpy(ptr, data, sizeof(shared_data_t));
-
-    UnmapViewOfFile(ptr);
-    ReleaseMutex(mutex);
-    return 0;
+    unlink(path);
 }
-
-/** Главная функция работы отправителя */
-void run_sender(HANDLE shm_fd) {
-    shared_data_t data = {0};
-
-    printf("Sender is running. Press Ctrl+C to stop.\n");
-
+void signal_handler(int sig) {
+    cleanup();
+    _exit(0);
+}
+int main() {
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    int path_fd = open(path, O_CREAT | O_EXCL, 0666);
+    if (path_fd == -1) {
+        fprintf(stderr, "Ошибка: уже запущен процесс-передатчик данных (файл shm уже существует).\n");
+        return 1;
+    }
+    close(path_fd);
+    key_t key = ftok(path, 11);
+    if (key == -1) {
+        fprintf(stderr, "Ошибка при создании ключа общей памяти.\n");
+        cleanup();
+        return 1;
+    }
+    shmid = shmget(key, 128, IPC_CREAT | IPC_EXCL | 0666);
+    if (shmid == -1) {
+        fprintf(stderr, "Ошибка: сегмент общей памяти уже существует или не может быть создан.\n");
+        cleanup();
+        return 1;
+    }
+    mas = shmat(shmid, NULL, 0);
+    if (mas == (char*)-1) {
+        fprintf(stderr, "Ошибка присоединения к общей памяти.\n");
+        cleanup();
+        return 1;
+    }
     while (1) {
-        char current_time[BUFFER_SIZE];
-        get_current_time(current_time, BUFFER_SIZE);
-
-        data.sender_pid = GetCurrentProcessId();
-        strncpy(data.time_str, current_time, BUFFER_SIZE);
-
-        if (write_to_shared_memory(shm_fd, &data) == -1) {
+        time_t rawtime = time(NULL);
+        struct tm *time_info = localtime(&rawtime);
+        if (time_info == NULL) {
+            fprintf(stderr, "Ошибка получения локального времени.\n");
             break;
         }
-
-        Sleep(1000);  // Задержка 1 секунда
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%H:%M:%S", time_info);
+        snprintf(mas, 128, "[Передача] Процесс PID=%u, время: %s\n", (unsigned)getpid(), time_str);
+        sleep(1);
     }
-}
-
-/** Очистка ресурсов */
-void cleanup_shared_memory(HANDLE shm_fd) {
-    CloseHandle(shm_fd);
-    CloseHandle(mutex);  // Закрываем мьютекс
-}
-
-int main() {
-    HANDLE shm_fd;
-
-    // Создание мьютекса
-    mutex = CreateMutex(NULL, FALSE, NULL);
-    if (mutex == NULL) {
-        printf("Failed to create mutex (Error: %lu)\n", GetLastError());
-        return EXIT_FAILURE;
-    }
-
-    // Инициализация разделяемой памяти
-    if (initialize_shared_memory(&shm_fd) == -1) {
-        return EXIT_FAILURE;
-    }
-
-    // Запуск основной логики отправителя
-    run_sender(shm_fd);
-
-    // Очистка ресурсов
-    cleanup_shared_memory(shm_fd);
-
-    return EXIT_SUCCESS;
+    cleanup();
+    return 0;
 }

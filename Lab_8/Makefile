@@ -1,12 +1,13 @@
-.PHONY: all clean run
+CC = gcc
+CFLAGS = -Wall -pthread
 
-all: sync_threads
+all: main
 
-sync_threads: sync_threads.c
-	gcc sync_threads.c -o sync_threads -Wall -Wextra
+main: main.o
+	$(CC) $(CFLAGS) -o main main.o
 
-run: sync_threads
-	./sync_threads
+main.o: main.c
+	$(CC) $(CFLAGS) -c main.c
 
 clean:
-	rm -rf *.o sync_threads
+	rm -f main main.o

@@ -1,267 +1,174 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <errno.h>
-#ifdef __unix__
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
 
-#define BUFFER_SIZE 4096
-#define MAX_FILENAME_LEN 256
+#define MAX_FILENAME 256
+#define HEADER_SIZE (sizeof(struct file_entry))
 
-typedef struct {
-    mode_t st_mode;
-    uid_t st_uid;
-    gid_t st_gid;
-    off_t st_size;
-    time_t st_mtime;
-} file_meta_t;
+struct file_entry {
+    char filename[MAX_FILENAME];
+    size_t size;
+    mode_t mode;
+};
 
-// Функция добавления файла в архив
-int add_file_to_archive(const char *archive_name, const char *filename) {
-    if (strlen(filename) > MAX_FILENAME_LEN) {
-        fprintf(stderr, "Filename too long: %s\n", filename);
-        return -1;
+void archive_file(int archive_fd, const char *filename) {
+    struct stat st;
+    if (stat(filename, &st) == -1) {
+        perror("Ошибка при получении информации о файле");
+        return;
     }
 
-    int archive_fd = open(archive_name, O_WRONLY | O_APPEND | O_CREAT, 0644);
-    if (archive_fd < 0) {
-        perror("Error opening archive");
-        return -1;
+    struct file_entry entry;
+    lseek(archive_fd, 0, SEEK_SET);
+    while (read(archive_fd, &entry, HEADER_SIZE) > 0) {
+        if (strcmp(entry.filename, filename) == 0) {
+            fprintf(stderr, "Файл %s уже существует в архиве. Добавление отменено\n", filename);
+            return;
+        }
+        lseek(archive_fd, entry.size, SEEK_CUR);
     }
+
+    strncpy(entry.filename, filename, MAX_FILENAME);
+    entry.size = st.st_size;
+    entry.mode = st.st_mode;
+
+    write(archive_fd, &entry, HEADER_SIZE);
 
     int file_fd = open(filename, O_RDONLY);
-    if (file_fd < 0) {
-        perror("Error opening file");
-        close(archive_fd);
-        return -1;
+    if (file_fd == -1) {
+        perror("Ошибка при открытии файла");
+        return;
     }
 
-    struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0) {
-        perror("Error getting file stats");
-        close(file_fd);
-        close(archive_fd);
-        return -1;
-    }
+    char *buffer = malloc(entry.size);
+    read(file_fd, buffer, entry.size);
+    write(archive_fd, buffer, entry.size);
 
-    int name_len = strlen(filename);
-    if (write(archive_fd, &name_len, sizeof(name_len)) != sizeof(name_len) ||
-        write(archive_fd, filename, name_len) != name_len) {
-        perror("Error writing filename to archive");
-        close(file_fd);
-        close(archive_fd);
-        return -1;
-    }
-
-    file_meta_t meta = {
-        .st_mode = file_stat.st_mode,
-        .st_uid = file_stat.st_uid,
-        .st_gid = file_stat.st_gid,
-        .st_size = file_stat.st_size,
-        .st_mtime = file_stat.st_mtime
-    };
-
-    if (write(archive_fd, &meta, sizeof(meta)) != sizeof(meta)) {
-        perror("Error writing file metadata to archive");
-        close(file_fd);
-        close(archive_fd);
-        return -1;
-    }
-
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
-    while ((bytes_read = read(file_fd, buffer, sizeof(buffer))) > 0) {
-        if (write(archive_fd, buffer, bytes_read) != bytes_read) {
-            perror("Error writing file content to archive");
-            close(file_fd);
-            close(archive_fd);
-            return -1;
-        }
-    }
-
-    if (bytes_read < 0) {
-        perror("Error reading file content");
-    }
-
+    free(buffer);
     close(file_fd);
-    close(archive_fd);
-    return 0;
 }
 
-int extract_file_from_archive(const char *archive_name, const char *filename, int delete_after) {
-    int archive_fd = open(archive_name, O_RDWR);
-    if (archive_fd < 0) {
-        perror("Error opening archive");
-        return -1;
+void extract_and_remove_file(const char *arch_name, const char *filename) {
+    int archive_fd = open(arch_name, O_RDWR);
+    if (archive_fd == -1) {
+        perror("Ошибка при открытии архива");
+        return;
     }
 
-    int temp_fd = open("temp_archive", O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (temp_fd < 0) {
-        perror("Error creating temporary archive");
+    int temp_fd = open("temp_archive", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (temp_fd == -1) {
+        perror("Ошибка при создании временного архива");
         close(archive_fd);
-        return -1;
+        return;
     }
 
-    int name_len;
-    char name_buffer[MAX_FILENAME_LEN];
-    file_meta_t meta;
+    struct file_entry entry;
     int found = 0;
 
-    while (read(archive_fd, &name_len, sizeof(name_len)) == sizeof(name_len)) {
-        if (name_len >= MAX_FILENAME_LEN ||
-            read(archive_fd, name_buffer, name_len) != name_len) {
-            fprintf(stderr, "Error reading filename from archive\n");
-            break;
-        }
-        name_buffer[name_len] = '\0';
-
-        if (read(archive_fd, &meta, sizeof(meta)) != sizeof(meta)) {
-            fprintf(stderr, "Error reading metadata from archive\n");
-            break;
-        }
-
-        if (strcmp(name_buffer, filename) == 0) {
+    while (read(archive_fd, &entry, HEADER_SIZE) > 0) {
+        if (strcmp(entry.filename, filename) == 0) {
             found = 1;
-            int output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, meta.st_mode);
-            if (output_fd < 0) {
-                perror("Error creating output file");
-                close(archive_fd);
-                close(temp_fd);
-                return -1;
-            }
-
-            char buffer[BUFFER_SIZE];
-            off_t remaining = meta.st_size;
-            while (remaining > 0) {
-                ssize_t bytes_to_read = (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE;
-                ssize_t bytes_read = read(archive_fd, buffer, bytes_to_read);
-                if (bytes_read <= 0) break;
-                if (write(output_fd, buffer, bytes_read) != bytes_read) {
-                    perror("Error writing to output file");
-                    close(output_fd);
-                    close(archive_fd);
-                    close(temp_fd);
-                    return -1;
-                }
-                remaining -= bytes_read;
-            }
-
-            close(output_fd);
-            if (!delete_after) {
-                write(temp_fd, &name_len, sizeof(name_len));
-                write(temp_fd, name_buffer, name_len);
-                write(temp_fd, &meta, sizeof(meta));
-            }
+            char *buffer = malloc(entry.size);
+            read(archive_fd, buffer, entry.size);
+            int file_fd = open(entry.filename, O_WRONLY | O_CREAT | O_TRUNC, entry.mode);
+            write(file_fd, buffer, entry.size);
+            close(file_fd);
+            free(buffer);
         } else {
-            write(temp_fd, &name_len, sizeof(name_len));
-            write(temp_fd, name_buffer, name_len);
-            write(temp_fd, &meta, sizeof(meta));
-
-            char buffer[BUFFER_SIZE];
-            off_t remaining = meta.st_size;
-            while (remaining > 0) {
-                ssize_t bytes_to_read = (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE;
-                ssize_t bytes_read = read(archive_fd, buffer, bytes_to_read);
-                if (bytes_read <= 0) break;
-                write(temp_fd, buffer, bytes_read);
-                remaining -= bytes_read;
-            }
+            write(temp_fd, &entry, HEADER_SIZE);
+            char *buffer = malloc(entry.size);
+            read(archive_fd, buffer, entry.size);
+            write(temp_fd, buffer, entry.size);
+            free(buffer);
         }
     }
 
-    close(archive_fd);
+    if (!found) {
+        fprintf(stderr, "Файл %s не найден в архиве\n", filename);
+    }
+
     close(temp_fd);
-
-    if (found) {
-        if (rename("temp_archive", archive_name) < 0) {
-            perror("Error renaming temporary archive");
-            return -1;
-        }
-    } else {
-        remove("temp_archive");
-        printf("File %s not found in archive\n", filename);
-        return -1;
-    }
-
-    return 0;
-}
-
-// Функция отображения информации об архиве
-int show_archive_stat(const char *archive_name) {
-    int archive_fd = open(archive_name, O_RDONLY);
-    if (archive_fd < 0) {
-        perror("Error opening archive");
-        return -1;
-    }
-
-    int name_len;
-    char name_buffer[MAX_FILENAME_LEN];
-    file_meta_t meta;
-
-    printf("Archive contents:\n");
-    while (read(archive_fd, &name_len, sizeof(name_len)) == sizeof(name_len)) {
-        if (name_len >= MAX_FILENAME_LEN ||
-            read(archive_fd, name_buffer, name_len) != name_len) {
-            fprintf(stderr, "Error reading filename from archive\n");
-            break;
-        }
-        name_buffer[name_len] = '\0';
-
-        if (read(archive_fd, &meta, sizeof(meta)) != sizeof(meta)) {
-            fprintf(stderr, "Error reading metadata from archive\n");
-            break;
-        }
-
-        printf("File: %s, Size: %ld bytes\n", name_buffer, meta.st_size);
-    }
-
     close(archive_fd);
-    return 0;
+    rename("temp_archive", arch_name);
 }
 
-void print_help() {
-    printf("Usage: ./archiver archive_name [options]\n");
-    printf("Options:\n");
-    printf("  -i, --input FILE   Add FILE to the archive\n");
-    printf("  -e, --extract FILE Extract FILE from the archive and remove it\n");
-    printf("  -s, --stat         Show archive contents\n");
-    printf("  -h, --help         Show this help message\n");
+void show_stat(int archive_fd) {
+    struct file_entry entry;
+    while (read(archive_fd, &entry, HEADER_SIZE) > 0) {
+        printf("Файл: %s Размер: %zu Режим: %o\n", entry.filename, entry.size, entry.mode);
+        lseek(archive_fd, entry.size, SEEK_CUR);
+    }
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        print_help();
-        return 1;
+    if (argc < 2) {
+        fprintf(stderr, "Использование: %s arch_name -i file1 | -e file1 | -s | -h\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
-    const char *archive_name = argv[1];
-    const char *command = argv[2];
+    if (argc == 2 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)){
+        printf("\nИспользование: %s arch_name [опции]\n", argv[0]);
+        printf("\nОпции:\n");
+        printf("  -i file1 ...     Добавить файлы в архив\n");
+        printf("  -e file1         Извлечь файл из архива и удалить его\n");
+        printf("  -s               Показать состояние архива\n");
+        printf("  -h               Показать это сообщение\n");
+        return EXIT_SUCCESS;
+    }
 
-    if (strcmp(command, "-i") == 0 || strcmp(command, "--input") == 0) {
-        if (argc != 4) {
-            fprintf(stderr, "Invalid arguments\n");
-            return 1;
+    const char *arch_name = argv[1];
+    int archive_fd = open(arch_name, O_RDWR | O_CREAT | O_APPEND, 0666);
+
+    if (archive_fd == -1) {
+        perror("Ошибка при открытии архива");
+        return EXIT_FAILURE;
+    }
+
+    if (argc == 3 || argc == 4) {
+        if (strcmp(argv[2], "-i") == 0 || strcmp(argv[2], "--input") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "Не указано имя файла для добавления\n");
+                close(archive_fd);
+                return EXIT_FAILURE;
+            }
+
+            for (int i = 3; i < argc; i++) {
+                archive_file(archive_fd, argv[i]);
+            }
+
+        } else if (strcmp(argv[2], "-e") == 0 || strcmp(argv[2], "--extract") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "Не указано имя файла для извлечения\n");
+                close(archive_fd);
+                return EXIT_FAILURE;
+            }
+            extract_and_remove_file(arch_name, argv[3]);
+
+        } else if (strcmp(argv[2], "-s") == 0 || strcmp(argv[2], "--stat") == 0) {
+            if (argc == 3) {
+                show_stat(archive_fd);
+            } else {
+                fprintf(stderr, "Неправильно указана опция\n");
+                close(archive_fd);
+                return EXIT_FAILURE;
+            }
+
+        } else {
+            fprintf(stderr, "Неизвестная опция: %s\n", argv[2]);
+            close(archive_fd);
+            return EXIT_FAILURE;
         }
-        return add_file_to_archive(archive_name, argv[3]);
-    } else if (strcmp(command, "-e") == 0 || strcmp(command, "--extract") == 0) {
-        if (argc != 4) {
-            fprintf(stderr, "Invalid arguments\n");
-            return 1;
-        }
-        return extract_file_from_archive(archive_name, argv[3], 1);
-    } else if (strcmp(command, "-s") == 0 || strcmp(command, "--stat") == 0) {
-        return show_archive_stat(archive_name);
-    } else if (strcmp(command, "-h") == 0 || strcmp(command, "--help") == 0) {
-        print_help();
-        return 0;
+
     } else {
-        fprintf(stderr, "Invalid command\n");
-        print_help();
-        return 1;
+        fprintf(stderr, "Не указана опция или указана неправильно\n");
+        close(archive_fd);
+        return EXIT_FAILURE;
     }
+
+    close(archive_fd);
+    return EXIT_SUCCESS;
 }
-#endif
