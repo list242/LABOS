@@ -4,48 +4,53 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <string.h>
 #include <unistd.h>
 #include <time.h>
-#include <fcntl.h>
-#include <string.h>
+
+struct sembuf sem_lock = {0, -1, 0};
+struct sembuf sem_open = {0, 1, 0};
 
 int main() {
-    const char* path = "./shm";
-    key_t key = ftok(path, 11);
-    if (key == -1) {
-        fprintf(stderr, "Ошибка: невозможно создать ключ ftok. Убедитесь, что передающая программа запущена.\n");
+    key_t key = ftok("my_shared_memory", 11);
+    if (key < 0) {
+        perror("Ошибка при генерации ключа");
         return 1;
     }
-    int shmid = shmget(key, 128, 0666);
+
+    int shmid = shmget(key, 256, 0666);
+    if (shmid < 0) {
+        perror("Ошибка при получении сегмента");
+        return 1;
+    }
+
     int semid = semget(key, 1, 0666);
-    if (shmid == -1 || semid == -1) {
-        fprintf(stderr, "Ошибка: невозможно подключиться к общей памяти или семафору. Убедитесь, что передающая программа запущена.\n");
+    if (semid < 0) {
+        perror("Ошибка при получении семафора");
         return 1;
     }
-    char *mas = shmat(shmid, NULL, 0);
-    if (mas == (char*)-1) {
-        fprintf(stderr, "Ошибка присоединения к общей памяти.\n");
+
+    char *mes = (char*) shmat(shmid, NULL, 0);
+    if (mes == (char*)-1) {
+        perror("Ошибка при подключении к сегменту");
         return 1;
     }
-    struct sembuf lock = {0, -1, 0};
+
     while (1) {
-        if (semop(semid, &lock, 1) == -1) {
-            fprintf(stderr, "Ошибка при ожидании семафора. Возможно, передающая программа завершилась.\n");
-            break;
-        }
-        time_t rawtime = time(NULL);
-        struct tm *time_info = localtime(&rawtime);
-        if (time_info == NULL) {
-            fprintf(stderr, "Ошибка получения локального времени.\n");
-            break;
-        }
-        char time_str[64];
-        strftime(time_str, sizeof(time_str), "%H:%M:%S", time_info);
-        printf("[Приём] Процесс PID=%u, текущее время: %s\n", (unsigned)getpid(), time_str);
-        printf("Получено сообщение: %s", mas);
-        printf("-----------------------------------------\n");
-        sleep(1);
+        semop(semid, &sem_lock, 1);
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char time_str[30];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+        printf("Текущее время: %s, PID: %d, Принятое сообщение: %s\n", time_str, getpid(), mes);
+        semop(semid, &sem_open, 1);
+	    sleep(1);
+
     }
-    shmdt(mas);
+
+    shmdt(mes);
+
+    
     return 0;
 }
+

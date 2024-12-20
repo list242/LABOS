@@ -1,11 +1,12 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99
-TARGET = arch
+EXECUTABLE = archiver
 
-all: $(TARGET)
+SOURCES = main.c
 
-$(TARGET): arch.c
-	$(CC) $(CFLAGS) -o $(TARGET) arch.c
+CFLAGS = -g -Wall
+
+$(EXECUTABLE): $(SOURCES)
+	gcc $(CFLAGS) $(SOURCES) -o $(EXECUTABLE)
 
 clean:
-	rm -f $(TARGET) *.o
+	rm -f $(EXECUTABLE)
+

@@ -6,93 +6,86 @@
 #include <sys/sem.h>
 #include <unistd.h>
 #include <time.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <string.h>
+#include <fcntl.h>
 #include <signal.h>
 
-int shmid = -1;
-int semid = -1;
-char* mas = (char*)-1;
-const char* path = "./shm";
-int path_fd = -1;
-void cleanup() {
-    if (mas != (char*)-1) {
-        shmdt(mas);
-        mas = (char*)-1;
-    }
+struct sembuf sem_lock = {0, -1, 0};
+struct sembuf sem_open = {0, 1, 0};
+
+const char *shm_name = "my_shared_memory";
+int shmid;
+int semid;
+
+void cleanup(int signum) {
     if (shmid != -1) {
         shmctl(shmid, IPC_RMID, NULL);
-        shmid = -1;
     }
     if (semid != -1) {
         semctl(semid, 0, IPC_RMID);
-        semid = -1;
     }
-    unlink(path);
-    if (path_fd != -1) {
-        close(path_fd);
-        path_fd = -1;
-    }
-}
-void sigint_handler(int signo) {
-    cleanup();
+    unlink(shm_name);
     exit(0);
 }
+
 int main() {
-    signal(SIGINT, sigint_handler);
-    signal(SIGTERM, sigint_handler);
-    path_fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0666);
-    if (path_fd == -1) {
-        fprintf(stderr, "Ошибка: уже существует процесс, передающий данные (файл shm уже существует).\n");
+    signal(SIGINT, cleanup);
+    signal(SIGTERM, cleanup);
+
+    int fd = open(shm_name, O_CREAT |  O_EXCL | 0666);
+    key_t key = ftok(shm_name, 11);
+    if (key < 0) {
+        perror("Ошибка при генерации ключа");
         return 1;
     }
-    key_t key = ftok(path, 11);
-    if (key == -1) {
-        fprintf(stderr, "Ошибка: невозможно создать ключ ftok.\n");
-        cleanup();
+    close(fd);
+
+    int shmid = shmget(key, 256, 0666 | IPC_CREAT);
+    if (shmid < 0) {
+        perror("Ошибка при создании сегмента");
         return 1;
     }
-    shmid = shmget(key, 128, IPC_CREAT | IPC_EXCL | 0666);
-    if (shmid == -1) {
-        fprintf(stderr, "Ошибка: невозможно создать сегмент памяти.\n");
-        cleanup();
+
+    struct shmid_ds shmid_ds_info;
+    if (shmctl(shmid, IPC_STAT, &shmid_ds_info) < 0) {
+        perror("Ошибка при получении информации о сегменте");
         return 1;
     }
-    semid = semget(key, 1, IPC_CREAT | IPC_EXCL | 0666);
-    if (semid == -1) {
-        fprintf(stderr, "Ошибка: невозможно создать семафор.\n");
-        cleanup();
+
+    if (shmid_ds_info.shm_nattch >= 1) {
+        perror("Уже существует");
+        exit(1); 
+    }
+
+    int semid = semget(key, 1, IPC_CREAT | 0666);
+    if (semid < 0) {
+        perror("Ошибка при создании семафора");
         return 1;
     }
-    if (semctl(semid, 0, SETVAL, 0) == -1) {
-        fprintf(stderr, "Ошибка: невозможно инициализировать семафор.\n");
-        cleanup();
+
+    semctl(semid, 0, SETVAL, 1);
+
+    char *mes = (char*) shmat(shmid, NULL, 0);
+    if (mes == (char*)-1) {
+        perror("Ошибка при подключении к сегменту");
         return 1;
     }
-    mas = shmat(shmid, NULL, 0);
-    if (mas == (char*)-1) {
-        fprintf(stderr, "Ошибка присоединения к общей памяти.\n");
-        cleanup();
-        return 1;
-    }
-    struct sembuf unlock = {0, 1, 0};
+
     while (1) {
-        time_t rawtime = time(NULL);
-        struct tm *time_info = localtime(&rawtime);
-        if (time_info == NULL) {
-            fprintf(stderr, "Ошибка получения локального времени.\n");
-            break;
-        }
-        char time_str[64];
-        strftime(time_str, sizeof(time_str), "%H:%M:%S", time_info);
-        snprintf(mas, 128, "[Передача] Процесс PID=%u, время: %s\n", (unsigned)getpid(), time_str);
-        if (semop(semid, &unlock, 1) == -1) {
-            fprintf(stderr, "Ошибка при освобождении семафора.\n");
-            break;
-        }
-        sleep(1);
+        semop(semid, &sem_lock, 1);
+	
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        
+        strftime(mes, 256, "%Y-%m-%d %H:%M:%S", tm_info);
+        sprintf(mes + strlen(mes), " PID: %d", getpid());
+        semop(semid, &sem_open, 1);
+	    sleep(3);
     }
-    cleanup();
+
+    shmdt(mes);
+    shmctl(shmid, IPC_RMID, NULL);
+    semctl(semid, 0, IPC_RMID);
+
     return 0;
 }

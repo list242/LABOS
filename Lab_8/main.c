@@ -1,69 +1,61 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 
-#define NUM_READERS 10
-#define BUFFER_SIZE 100
+#define ARRAY_SIZE 21
+#define READER_COUNT 10
 
-char shared_array[BUFFER_SIZE];
-pthread_mutex_t mutex;
-int counter = 0;
+char shared_array[ARRAY_SIZE];
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void *writer_thread(void *arg) {
-    while (1) {
+void* writer_thread(void* arg) {
+    int index = 0;
+    for (int i = 0; i < 10; i++) {
         pthread_mutex_lock(&mutex);
-        counter++;
-        snprintf(shared_array, BUFFER_SIZE, "%d", counter);
+        index += snprintf(shared_array + index, ARRAY_SIZE - index, "%d", i);
+        if (shared_array[index - 1] == ' ') {
+            shared_array[index - 1] = '\0';
+        }
+        printf("Пишущий поток записал: %d\n", i);
         pthread_mutex_unlock(&mutex);
         sleep(1);
     }
     return NULL;
 }
-void *reader_thread(void *arg) {
-    int thread_num = *((int *)arg);
-    free(arg);
-    while (1) {
-        char local_copy[BUFFER_SIZE];
-        strcpy(local_copy, shared_array);
-        printf("Читающий поток %d: shared_array = %s\n", thread_num, local_copy);
-        sleep(1);
+
+
+
+void* reader_thread(void* arg) {
+    long tid = (long)arg;
+    for (int i = 0; i < 10; i++) {
+        pthread_mutex_lock(&mutex);
+        printf("Читающий поток %ld, tid: %lx, читает: ", tid, pthread_self());
+        for (int j = 0; j < ARRAY_SIZE; j++) {
+            printf("%c", shared_array[j]);
+        }
+        printf("\n");
+        pthread_mutex_unlock(&mutex);
+        sleep(1); 
     }
     return NULL;
 }
 int main() {
-    pthread_t writer;
-    pthread_t readers[NUM_READERS];
-    if (pthread_mutex_init(&mutex, NULL) != 0) {
-        printf("Ошибка инициализации мьютекса\n");
-        return 1;
+    pthread_t writers, readers[READER_COUNT];
+
+    pthread_create(&writers, NULL, writer_thread, NULL);
+
+    for (long i = 0; i < READER_COUNT; i++) {
+        pthread_create(&readers[i], NULL, reader_thread, (void*)i);
     }
-    if (pthread_create(&writer, NULL, writer_thread, NULL) != 0) {
-        printf("Ошибка создания пишущего потока\n");
-        return 1;
-    }
-    for (int i = 0; i < NUM_READERS; i++) {
-        int *arg = malloc(sizeof(*arg));
-        if (arg == NULL) {
-            printf("Ошибка выделения памяти для аргумента потока\n");
-            exit(EXIT_FAILURE);
-        }
-        *arg = i;
-        if (pthread_create(&readers[i], NULL, reader_thread, arg) != 0) {
-            printf("Ошибка создания читающего потока %d\n", i);
-            return 1;
-        }
-    }
-    sleep(10);
-    pthread_cancel(writer);
-    for (int i = 0; i < NUM_READERS; i++) {
-        pthread_cancel(readers[i]);
-    }
-    pthread_join(writer, NULL);
-    for (int i = 0; i < NUM_READERS; i++) {
+
+    pthread_join(writers, NULL);
+
+    for (int i = 0; i < READER_COUNT; i++) {
         pthread_join(readers[i], NULL);
     }
+
     pthread_mutex_destroy(&mutex);
     return 0;
 }
