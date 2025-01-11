@@ -1,11 +1,13 @@
-EXECUTABLE = mymutex
+CC = gcc
+CFLAGS = -Wall -pthread
 
-SOURCES = main.c
+all: main
 
-CFLAGS = -g -Wall -lpthread
+main: main.o
+	$(CC) $(CFLAGS) -o main main.o
 
-$(EXECUTABLE): $(SOURCES)
-	gcc $(CFLAGS) $(SOURCES) -o $(EXECUTABLE)
+main.o: main.c
+	$(CC) $(CFLAGS) -c main.c
 
 clean:
-	rm -f $(EXECUTABLE)
+	rm -f main main.o
